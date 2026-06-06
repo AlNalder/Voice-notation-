@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Voice Notation Editor</title>
+<script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.2/build/cjs/vexflow.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: Georgia, serif;
+  background: #777;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 8px;
+  gap: 12px;
+}
+#page {
+  background: white;
+  width: 100%;
+  max-width: 680px;
+  min-height: 400px;
+  padding: 5% 5%;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.35);
+  box-sizing: border-box;
+}
+#title { text-align: center; margin-bottom: 12px; }
+#title h1 { font-size: clamp(22px, 8vw, 52px); font-weight: bold; color: #1a1410; letter-spacing: 0.02em; }
+#title p  { font-size: clamp(10px, 3vw, 18px); color: #666; font-style: italic; margin-top: 4px; }
+hr { border: none; border-top: 1px solid #ddd; margin-bottom: 14px; }
+#score { width: 100%; }
+#score svg { max-width: 100%; }
+#controls {
+  background: #f5f0e8;
+  width: 100%;
+  max-width: 680px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+textarea {
+  width: 100%; padding: 10px;
+  font-family: Georgia, serif; font-size: 1rem;
+  border: 2px solid #1a1410; outline: none;
+  resize: none; background: white;
+}
+.btn-row { display: flex; gap: 8px; }
+#send-btn {
+  flex: 1; padding: 12px;
+  background: #1a1410; color: white;
+  border: none; font-family: serif; font-size: 1rem; cursor: pointer;
+}
+#send-btn:active { background: #8b2020; }
+#clear-btn {
+  padding: 12px 16px; background: none;
+  border: 2px solid #c8b89a; color: #7a6e60;
+  font-family: Georgia, serif; font-size: 0.85rem; cursor: pointer;
+}
+#mic-btn {
+  padding: 12px 16px; background: #2d6e3e; color: white;
+  border: none; font-family: Georgia, serif; font-size: 0.85rem; cursor: pointer;
+}
+#mic-btn.listening { background: #8b2020; animation: pulse 0.8s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+.quick-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; }
+.qbtn {
+  padding: 7px 4px; border: 1px solid #c8b89a; background: none;
+  font-family: Georgia, serif; font-size: 0.76rem; color: #7a6e60;
+  cursor: pointer; line-height: 1.2;
+}
+.qbtn:active { background: #ede8d8; }
+#log {
+  max-height: 100px; overflow-y: auto;
+  font-size: 0.75rem; font-family: monospace;
+}
+.log-entry {
+  padding: 3px 6px; margin-bottom: 2px;
+  background: #faf7f0;
+}
+.log-cmd  { border-left: 3px solid #1a1410; color: #444; }
+.log-ok   { border-left: 3px solid #2d6e3e; color: #444; }
+.log-err  { border-left: 3px solid #8b2020; color: #8b2020; }
+.log-sys  { border-left: 3px solid #aaa;    color: #888; }
+#status { font-size: 0.6rem; color: #ccc; font-family: monospace; }
+#api-key-section {
+  background: #fff8e8; border: 1px solid #c8b89a;
+  padding: 10px 14px; width: 100%; max-width: 680px;
+}
+#api-key-section p { font-size: 0.8rem; color: #7a6e60; margin-bottom: 6px; }
+#api-key-input {
+  width: 100%; padding: 8px; font-family: monospace; font-size: 0.8rem;
+  border: 1px solid #c8b89a; outline: none; background: white;
+}
+#save-key-btn {
+  margin-top: 6px; padding: 6px 14px;
+  background: #1a1410; color: white; border: none;
+  font-family: Georgia, serif; font-size: 0.8rem; cursor: pointer;
+}
+</style>
+</head>
+<body>
+
+<div id="api-key-section">
+  <p>Enter your Anthropic API key to enable voice command editing:</p>
+  <input id="api-key-input" type="password" placeholder="sk-ant-..." />
+  <br><button id="save-key-btn">Save Key</button>
+  <span id="key-status" style="font-size:0.75rem;color:#2d6e3e;margin-left:8px;"></span>
+</div>
+
+<div id="page">
+  <div id="title">
+    <h1 id="score-title">Summertime</h1>
+    <p id="score-composer">Al Nalder</p>
+  </div>
+  <hr>
+  <div id="score"></div>
+</div>
+
+<div id="controls">
+  <div class="btn-row">
+    <button id="mic-btn">&#127908; Hold to speak</button>
+    <button id="clear-btn">Clear</button>
+  </div>
+  <textarea id="cmd-input" rows="2" placeholder="Type a command or hold mic to speak…"></textarea>
+  <div class="btn-row">
+    <button id="send-btn">Send &#8594;</button>
+  </div>
+  <div class="quick-grid">
+    <button class="qbtn" data-cmd="Add bass clef layer with chord root whole notes">Bass clef</button>
+    <button class="qbtn" data-cmd="Set layers.tab to false">Tab off</button>
+    <button class="qbtn" data-cmd="Set layers.tab to true">Tab on</button>
+    <button class="qbtn" data-cmd="Transpose to G major">Key of G</button>
+    <button class="qbtn" data-cmd="Change timeSignature to 3/4">3/4 time</button>
+    <button class="qbtn" data-cmd="Change tabPosition to 5">Position 5</button>
+    <button class="qbtn" data-cmd="Change tabPosition to open">Open pos.</button>
+    <button class="qbtn" data-cmd="Change barsPerSystem to 2">2 bars/line</button>
+    <button class="qbtn" data-cmd="Change barsPerSystem to 4">4 bars/line</button>
+  </div>
+  <div id="log"></div>
+</div>
+<div id="status">Voice Notation Editor — GitHub Pages</div>
+
+<script>
+// ── API Key ──────────────────────────────────────────────────
+let API_KEY = localStorage.getItem('vne_api_key') || '';
+if (API_KEY) {
+  document.getElementById('key-status').textContent = 'Key loaded';
+  document.getElementById('api-key-section').style.display = 'none';
+}
+document.getElementById('save-key-btn').onclick = () => {
+  API_KEY = document.getElementById('api-key-input').value.trim();
+  if (API_KEY) {
+    localStorage.setItem('vne_api_key', API_KEY);
+    document.getElementById('key-status').textContent = 'Saved!';
+    setTimeout(() => { document.getElementById('api-key-section').style.display = 'none'; }, 800);
+  }
+};
+
+// ── Score Data Model ─────────────────────────────────────────
+let SCORE = {
+  title: "Summertime",
+  composer: "Al Nalder",
+  timeSignature: { num: 4, den: 4 },
+  keySignature: "C",
+  barsPerSystem: 4,
+  layers: { chordBoxes: true, chordNames: true, treble: true, lyrics: true, bass: false, tab: true },
+  tabPosition: "open",
+  bars: [
+    { chord: "C", notes: [
+      { pitch: "C4", dur: "q", syl: "sum-", tieStart: false, tieEnd: false },
+      { pitch: "E4", dur: "q", syl: "mer-", tieStart: false, tieEnd: false },
+      { pitch: "G4", dur: "h", syl: "time", tieStart: false, tieEnd: false }
+    ]},
+    { chord: "F", notes: [
+      { pitch: "F4", dur: "8", syl: "sum-", tieStart: false, tieEnd: false },
+      { pitch: "E4", dur: "q", syl: "mer-", tieStart: false, tieEnd: false },
+      { pitch: "D4", dur: "8", syl: "time", tieStart: true,  tieEnd: false },
+      { pitch: "D4", dur: "h", syl: null,   tieStart: false, tieEnd: true  }
+    ]},
+    { chord: "Dm", notes: [
+      { pitch: "E4", dur: "q", syl: "sum-", tieStart: false, tieEnd: false },
+      { pitch: "F4", dur: "q", syl: "mer-", tieStart: false, tieEnd: false },
+      { pitch: "G4", dur: "h", syl: "time", tieStart: false, tieEnd: false }
+    ]},
+    { chord: "G", notes: [
+      { pitch: "A4", dur: "8", syl: "sum-", tieStart: false, tieEnd: false },
+      { pitch: "D4", dur: "q", syl: "mer-", tieStart: false, tieEnd: false },
+      { pitch: "D4", dur: "8", syl: "time", tieStart: true,  tieEnd: false },
+      { pitch: "D4", dur: "h", syl: null,   tieStart: false, tieEnd: true  }
+    ]},
+    { chord: "C", notes: [
+      { pitch: "C4", dur: "q", syl: "sum-", tieStart: false, tieEnd: false },
+      { pitch: "E4", dur: "q", syl: "mer-", tieStart: false, tieEnd: false },
+      { pitch: "G4", dur: "h", syl: "time", tieStart: false, tieEnd: false }
+    ]},
+    { chord: "Dm", notes: [
+      { pitch: "F4", dur: "8", syl: "sum-", tieStart: false, tieEnd: false },
+      { pitch: "E4", dur: "q", syl: "mer-", tieStart: false, tieEnd: false },
+      { pitch: "D4", dur: "8", syl: "time", tieStart: true,  tieEnd: false },
+      { pitch: "D4", dur: "h", syl: null,   tieStart: false, tieEnd: true  }
+    ]},
+    { chord: "F", chordMid: "G", notes: [
+      { pitch: "E4", dur: "q", syl: "sum-", tieStart: false, tieEnd: false },
+      { pitch: "G4", dur: "q", syl: "mer-", tieStart: false, tieEnd: false },
+      { pitch: "D4", dur: "8", syl: "sum-", tieStart: false, tieEnd: false, chordChange: "G" },
+      { pitch: "G4", dur: "8", syl: "mer-", tieStart: false, tieEnd: false },
+      { pitch: "C4", dur: "8", syl: "time", tieStart: true,  tieEnd: false }
+    ]},
+    { chord: "C", notes: [
+      { pitch: "C4", dur: "w", syl: null, tieStart: false, tieEnd: true }
+    ]}
+  ]
+};
+
+// ── Guitar utilities ─────────────────────────────────────────
+const STRING_OPEN_MIDI = [64, 59, 55, 50, 45, 40];
+function pitchToMidi(p) {
+  const m = { C:0,D:2,E:4,F:5,G:7,A:9,B:11 };
+  const r = p.match(/^([A-G])(#|b)?(\d)$/);
+  if (!r) return 60;
+  const acc = r[2]==='#'?1:r[2]==='b'?-1:0;
+  return (parseInt(r[3])+1)*12 + m[r[1]] + acc;
+}
+function getTab(pitch, position) {
+  const midi = pitchToMidi(pitch);
+  const minF = position==='open'?0:position-1;
+  const maxF = position==='open'?4:position+4;
+  let best = null;
+  for (let s=5;s>=0;s--) {
+    const f = midi - STRING_OPEN_MIDI[s];
+    if (f>=minF && f<=maxF) best={string:s,fret:f};
+  }
+  if (!best) {
+    let minD=Infinity;
+    for (let s=5;s>=0;s--) {
+      const f=midi-STRING_OPEN_MIDI[s];
+      if (f>=0&&f<=24) { const d=Math.abs(f-(position==='open'?0:position)); if(d<minD){minD=d;best={string:s,fret:f};} }
+    }
+  }
+  return best||{string:3,fret:0};
+}
+
+// ── Chord shapes ─────────────────────────────────────────────
+const CHORD_SHAPES = {
+  C:{frets:[-1,3,2,0,1,0]}, F:{frets:[-1,-1,3,2,1,1]},
+  Dm:{frets:[-1,-1,0,2,3,1]}, G:{frets:[3,2,0,0,0,3]}
+};
+
+function drawChordBox(ctx, name, x, y, size) {
+  const shape = CHORD_SHAPES[name];
+  if (!shape) { ctx.fillText(name, x+size/2, y+size/2); return; }
+  const { frets } = shape;
+  const padL=size*0.15, padT=size*0.28;
+  const strGap=(size-padL*2)/5, fretGap=(size*0.72)/4;
+  ctx.font = `bold ${size*0.2}px Georgia`;
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#1a1410';
+  ctx.fillText(name, x+size/2, y+size*0.18);
+  // Nut
+  ctx.fillRect(x+padL, y+padT, 5*strGap, 2);
+  // Fret lines
+  ctx.strokeStyle='#ccc'; ctx.lineWidth=0.6;
+  for (let i=1;i<=4;i++) {
+    ctx.beginPath(); ctx.moveTo(x+padL,y+padT+i*fretGap); ctx.lineTo(x+padL+5*strGap,y+padT+i*fretGap); ctx.stroke();
+  }
+  // String lines
+  ctx.strokeStyle='#1a1410'; ctx.lineWidth=0.7;
+  for (let i=0;i<=5;i++) {
+    ctx.beginPath(); ctx.moveTo(x+padL+i*strGap,y+padT); ctx.lineTo(x+padL+i*strGap,y+padT+4*fretGap); ctx.stroke();
+  }
+  // Dots / mutes / opens
+  frets.forEach((f,si) => {
+    const sx = x+padL+si*strGap;
+    if (f===-1) { ctx.fillStyle='#888'; ctx.font=`${size*0.15}px Georgia`; ctx.fillText('x',sx,y+padT-3); }
+    else if (f===0) { ctx.strokeStyle='#1a1410'; ctx.lineWidth=0.8; ctx.beginPath(); ctx.arc(sx,y+padT-5,2.5,0,Math.PI*2); ctx.stroke(); }
+    else { ctx.fillStyle='#1a1410'; ctx.beginPath(); ctx.arc(sx,y+padT+(f-0.5)*fretGap,size*0.08,0,Math.PI*2); ctx.fill(); }
+  });
+}
+
+// ── Main render ───────────────────────────────────────────────
+function render() {
+  const container = document.getElementById('score');
+  container.innerHTML = '';
+  document.getElementById('score-title').textContent = SCORE.title;
+  document.getElementById('score-composer').textContent = SCORE.composer;
+
+  if (!window.Vex) { container.innerHTML='<p style="color:#c00;padding:10px">VexFlow not loaded</p>'; return; }
+  const VF = Vex.Flow;
+
+  const pageEl = document.getElementById('page');
+  const pageW = pageEl.clientWidth;
+  const contentW = pageW * 0.9;
+  const bps = SCORE.barsPerSystem || 4;
+
+  // Split bars into systems
+  const systems = [];
+  for (let i=0; i<SCORE.bars.length; i+=bps) systems.push(SCORE.bars.slice(i,i+bps));
+
+  systems.forEach((sysBars, si) => {
+    const systemDiv = document.createElement('div');
+    systemDiv.style.marginBottom = '8px';
+    container.appendChild(systemDiv);
+
+    // Chord boxes row
+    if (SCORE.layers.chordBoxes) {
+      const seen = new Set();
+      const chords = [];
+      sysBars.forEach(b => {
+        if (b.chord && !seen.has(b.chord)) { seen.add(b.chord); chords.push(b.chord); }
+        if (b.chordMid && !seen.has(b.chordMid)) { seen.add(b.chordMid); chords.push(b.chordMid); }
+      });
+      if (chords.length > 0) {
+        const boxSize = Math.min(48, contentW / (chords.length * 2.5));
+        const boxCanvas = document.createElement('canvas');
+        boxCanvas.width = contentW;
+        boxCanvas.height = boxSize * 1.4;
+        boxCanvas.style.display = 'block';
+        const bctx = boxCanvas.getContext('2d');
+        chords.forEach((c, ci) => drawChordBox(bctx, c, ci*(boxSize+6)+16, 2, boxSize));
+        systemDiv.appendChild(boxCanvas);
+      }
+    }
+
+    // VexFlow stave
+    const vfDiv = document.createElement('div');
+    systemDiv.appendChild(vfDiv);
+
+    const hasTab = SCORE.layers.tab;
+    const svgH = hasTab ? 220 : 130;
+    const renderer = new VF.Renderer(vfDiv, VF.Renderer.Backends.SVG);
+    renderer.resize(contentW, svgH);
+    const ctx = renderer.getContext();
+
+    const leftX = 16;
+    const stavW = contentW - leftX - 10;
+    const isFirst = si === 0;
+
+    // Treble stave
+    const stave = new VF.Stave(leftX, 10, stavW);
+    if (isFirst) {
+      stave.addClef('treble').addKeySignature(SCORE.keySignature)
+        .addTimeSignature(SCORE.timeSignature.num+'/'+SCORE.timeSignature.den);
+    } else {
+      stave.addClef('treble').addKeySignature(SCORE.keySignature);
+    }
+    stave.setContext(ctx).draw();
+
+    // Build notes
+    const allNotes = [];
+    const tieStarts = [], tieEnds = [];
+
+    sysBars.forEach(bar => {
+      bar.notes.forEach(n => {
+        const pm = n.pitch.match(/^([A-Gb#]+)(\d)$/);
+        const noteName = pm ? pm[1].toLowerCase() : 'c';
+        const oct = pm ? pm[2] : '4';
+        const vn = new VF.StaveNote({ keys:[noteName+'/'+oct], duration:n.dur, auto_stem:true });
+
+        if (n.syl && SCORE.layers.lyrics) {
+          vn.addModifier(new VF.Annotation(n.syl)
+            .setVerticalJustification(VF.Annotation.VerticalJustify.BOTTOM)
+            .setFont('Georgia', 11), 0);
+        }
+        if (n.chord && SCORE.layers.chordNames) {
+          vn.addModifier(new VF.Annotation(n.chord)
+            .setVerticalJustification(VF.Annotation.VerticalJustify.TOP)
+            .setFont('Georgia', 12, 'bold italic'), 0);
+        }
+        if (n.chordChange && SCORE.layers.chordNames) {
+          vn.addModifier(new VF.Annotation(n.chordChange)
+            .setVerticalJustification(VF.Annotation.VerticalJustify.TOP)
+            .setFont('Georgia', 12, 'bold italic'), 0);
+        }
+        if (n.tieStart) tieStarts.push({ note:vn, idx:allNotes.length });
+        if (n.tieEnd)   tieEnds.push({ note:vn, idx:allNotes.length });
+        allNotes.push(vn);
+      });
+    });
+
+    const totalBeats = SCORE.timeSignature.num * sysBars.length;
+    const voice = new VF.Voice({ num_beats:totalBeats, beat_value:SCORE.timeSignature.den })
+      .setMode(VF.Voice.Mode.SOFT);
+    voice.addTickables(allNotes);
+    new VF.Formatter().joinVoices([voice]).format([voice], stavW - 80);
+    voice.draw(ctx, stave);
+
+    // Ties
+    tieStarts.forEach(ts => {
+      const te = tieEnds.find(e => e.idx > ts.idx);
+      if (te) new VF.StaveTie({ first_note:ts.note, last_note:te.note, first_indices:[0], last_indices:[0] }).setContext(ctx).draw();
+    });
+
+    // Tab stave
+    if (hasTab) {
+      const tabY = 130;
+      const tabStave = new VF.TabStave(leftX, tabY, stavW);
+      tabStave.addClef('tab').setContext(ctx).draw();
+      const tabNotes = [];
+      sysBars.forEach(bar => {
+        bar.notes.forEach(n => {
+          if (n.tieEnd) { tabNotes.push(new VF.GhostNote({ duration:n.dur })); return; }
+          const t = getTab(n.pitch, SCORE.tabPosition);
+          tabNotes.push(new VF.TabNote({ positions:[{str:t.string+1, fret:t.fret}], duration:n.dur }));
+        });
+      });
+      const tabVoice = new VF.Voice({ num_beats:totalBeats, beat_value:SCORE.timeSignature.den }).setMode(VF.Voice.Mode.SOFT);
+      tabVoice.addTickables(tabNotes);
+      new VF.Formatter().joinVoices([tabVoice]).format([tabVoice], stavW - 80);
+      tabVoice.draw(ctx, tabStave);
+
+      // Square bracket
+      const bx = leftX - 10;
+      ctx.beginPath(); ctx.lineWidth = 2; ctx.strokeStyle = '#1a1410';
+      ctx.moveTo(bx,10); ctx.lineTo(bx, tabY+50);
+      ctx.moveTo(bx,10); ctx.lineTo(bx+6,10);
+      ctx.moveTo(bx,tabY+50); ctx.lineTo(bx+6,tabY+50);
+      ctx.stroke();
+    }
+  });
+}
+
+// ── Log ───────────────────────────────────────────────────────
+function addLog(cls, text) {
+  const log = document.getElementById('log');
+  const d = document.createElement('div');
+  d.className = 'log-entry log-'+cls;
+  d.textContent = text;
+  log.appendChild(d);
+  log.scrollTop = log.scrollHeight;
+}
+
+// ── Claude API ────────────────────────────────────────────────
+async function sendCommand(command) {
+  if (!command.trim()) return;
+  if (!API_KEY) { addLog('err','No API key — enter it above'); return; }
+  addLog('cmd', command);
+  document.getElementById('cmd-input').value = '';
+
+  const prompt = `You are a music notation assistant. Return ONLY valid JSON — no markdown, no explanation.
+
+Score structure: { title, composer, timeSignature:{num,den}, keySignature, barsPerSystem,
+  layers:{chordBoxes,chordNames,treble,lyrics,bass,tab}, tabPosition,
+  bars:[{ chord, chordMid?, notes:[{pitch,dur,syl,tieStart,tieEnd,chordChange?}] }] }
+
+Duration: w=whole h=half q=quarter 8=eighth
+tieEnd notes always have syl:null
+Syllables use trailing hyphen if not last: "sum-" "mer-" "time"
+
+Current score:
+${JSON.stringify(SCORE, null, 2)}
+
+Command: "${command}"
+
+Return complete updated JSON only.`;
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'x-api-key': API_KEY, 'anthropic-version':'2023-06-01' },
+      body: JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:2000, messages:[{role:'user',content:prompt}] })
+    });
+    if (!res.ok) throw new Error('HTTP '+res.status);
+    const data = await res.json();
+    const text = data.content?.map(b=>b.text||'').join('').trim().replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
+    SCORE = JSON.parse(text);
+    render();
+    addLog('ok','Score updated');
+  } catch(e) {
+    addLog('err', e.message);
+  }
+}
+
+// ── Voice ─────────────────────────────────────────────────────
+let recognition = null;
+const micBtn = document.getElementById('mic-btn');
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (SR) {
+  recognition = new SR();
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  recognition.onresult = e => {
+    let txt = '';
+    for (let i=e.resultIndex;i<e.results.length;i++) txt += e.results[i][0].transcript;
+    document.getElementById('cmd-input').value = txt;
+  };
+  recognition.onend = () => {
+    micBtn.classList.remove('listening');
+    micBtn.textContent = '\uD83C\uDF08 Hold to speak';
+    const val = document.getElementById('cmd-input').value.trim();
+    if (val) sendCommand(val);
+  };
+  recognition.onerror = e => {
+    micBtn.classList.remove('listening');
+    if (e.error !== 'no-speech') addLog('err','Mic: '+e.error);
+  };
+  micBtn.addEventListener('mousedown', () => { recognition.start(); micBtn.classList.add('listening'); micBtn.textContent = '\uD83C\uDF08 Listening…'; });
+  micBtn.addEventListener('mouseup', () => { recognition.stop(); });
+  micBtn.addEventListener('touchstart', e => { e.preventDefault(); recognition.start(); micBtn.classList.add('listening'); micBtn.textContent = '\uD83C\uDF08 Listening…'; });
+  micBtn.addEventListener('touchend', e => { e.preventDefault(); recognition.stop(); });
+} else {
+  micBtn.textContent = 'Mic not available';
+  micBtn.style.opacity = '0.4';
+}
+
+// ── Event listeners ───────────────────────────────────────────
+document.getElementById('send-btn').onclick = () => sendCommand(document.getElementById('cmd-input').value);
+document.getElementById('clear-btn').onclick = () => { document.getElementById('cmd-input').value = ''; };
+document.getElementById('cmd-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendCommand(e.target.value); }
+});
+document.querySelectorAll('.qbtn').forEach(btn => {
+  btn.onclick = () => sendCommand(btn.dataset.cmd);
+});
+
+// ── Init ──────────────────────────────────────────────────────
+window.addEventListener('load', () => {
+  if (window.Vex) {
+    addLog('sys', 'VexFlow ready — score loaded');
+    render();
+  } else {
+    addLog('err', 'VexFlow failed to load');
+  }
+});
+window.addEventListener('resize', render);
+</script>
+</body>
+</html>
