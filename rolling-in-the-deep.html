@@ -15,121 +15,248 @@ body {
   flex-direction: column;
   align-items: center;
   padding: 12px 8px;
-  gap: 12px;
+  gap: 10px;
 }
 #page {
   background: white;
   width: 100%;
   max-width: 680px;
-  min-height: 400px;
-  padding: 5% 5%;
   box-shadow: 0 4px 20px rgba(0,0,0,0.35);
   box-sizing: border-box;
 }
 #title { text-align: center; margin-bottom: 4px; }
-#title h1 { font-size: clamp(20px, 7vw, 44px); font-weight: bold; color: #1a1410; letter-spacing: 0.02em; }
-#title p  { font-size: clamp(10px, 3vw, 16px); color: #666; font-style: italic; margin-top: 4px; }
-#title .section { font-size: clamp(12px, 4vw, 20px); color: #1a1410; font-weight: bold; margin-top: 14px; margin-bottom: 4px; }
+#title h1 { font-weight: bold; color: #1a1410; letter-spacing: 0.02em; line-height: 1.1; }
+#title p  { color: #666; font-style: italic; margin-top: 4px; }
+#title .section { color: #1a1410; font-weight: bold; margin-top: 14px; margin-bottom: 4px; }
 hr { border: none; border-top: 1px solid #ddd; margin-bottom: 14px; }
 #score { width: 100%; }
 #score svg { max-width: 100%; }
+#controls {
+  background: #f5f0e8;
+  width: 100%;
+  max-width: 680px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+textarea {
+  width: 100%; padding: 10px;
+  font-family: Georgia, serif; font-size: 1rem;
+  border: 2px solid #1a1410; outline: none;
+  resize: none; background: white;
+}
+.btn-row { display: flex; gap: 8px; }
+#send-btn {
+  flex: 1; padding: 12px;
+  background: #1a1410; color: white;
+  border: none; font-family: serif; font-size: 1rem; cursor: pointer;
+}
+.quick-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; }
+.qbtn {
+  padding: 7px 4px; border: 1px solid #c8b89a; background: none;
+  font-family: Georgia, serif; font-size: 0.76rem; color: #7a6e60;
+  cursor: pointer; line-height: 1.2;
+}
+.qbtn:active { background: #ede8d8; }
+#log {
+  max-height: 90px; overflow-y: auto;
+  font-size: 0.75rem; font-family: monospace;
+}
+.log-entry { padding: 3px 6px; margin-bottom: 2px; background: #faf7f0; }
+.log-cmd  { border-left: 3px solid #1a1410; color: #444; }
+.log-ok   { border-left: 3px solid #2d6e3e; color: #444; }
+.log-err  { border-left: 3px solid #8b2020; color: #8b2020; }
+.log-sys  { border-left: 3px solid #aaa;    color: #888; }
+#api-key-section {
+  background: #fff8e8; border: 1px solid #c8b89a;
+  padding: 10px 14px; width: 100%; max-width: 680px;
+}
+#api-key-section p { font-size: 0.8rem; color: #7a6e60; margin-bottom: 6px; }
+#api-key-input {
+  width: 100%; padding: 8px; font-family: monospace; font-size: 0.8rem;
+  border: 1px solid #c8b89a; outline: none; background: white;
+}
+#save-key-btn {
+  margin-top: 6px; padding: 6px 14px;
+  background: #1a1410; color: white; border: none;
+  font-family: Georgia, serif; font-size: 0.8rem; cursor: pointer;
+}
 #status { font-size: 0.6rem; color: #ccc; font-family: monospace; }
 </style>
 </head>
 <body>
 
+<div id="api-key-section">
+  <p>Enter your Anthropic API key to enable voice/text command editing:</p>
+  <input id="api-key-input" type="password" placeholder="sk-ant-..." />
+  <br><button id="save-key-btn">Save Key</button>
+  <span id="key-status" style="font-size:0.75rem;color:#2d6e3e;margin-left:8px;"></span>
+</div>
+
 <div id="page">
   <div id="title">
-    <h1>Rolling in the Deep</h1>
-    <p>Adele — arr. for piano accompaniment</p>
-    <div class="section">Intro — Left Hand (root notes)</div>
+    <h1 id="score-title">Rolling in the Deep</h1>
+    <p id="score-composer">Adele — arr. for piano accompaniment</p>
+    <div class="section" id="score-section">Intro — Left Hand (root notes)</div>
   </div>
   <hr>
   <div id="score"></div>
+</div>
+
+<div id="controls">
+  <textarea id="cmd-input" rows="2" placeholder="Type a command — e.g. 'change to 4 bars per line'…"></textarea>
+  <div class="btn-row">
+    <button id="send-btn">Send &#8594;</button>
+  </div>
+  <div class="quick-grid">
+    <button class="qbtn" data-cmd="Set barsPerSystem to 1">1 bar/line</button>
+    <button class="qbtn" data-cmd="Set barsPerSystem to 2">2 bars/line</button>
+    <button class="qbtn" data-cmd="Set barsPerSystem to 4">4 bars/line</button>
+  </div>
+  <div id="log"></div>
 </div>
 <div id="status">Accompaniment Arranger — Phase 1 prototype</div>
 
 <script>
 // ============================================================
-// SCORE DATA MODEL — extended for independent treble/bass parts
+// SCORE DATA MODEL
 // ============================================================
 //
-// This is the foundation for Phase 1 of the roadmap: each bar
-// can have an independent "bass" array and "treble" array.
-// For this intro, treble is empty — left hand only.
-//
-// Roots given: C - G - Bb - G, each bar = 8 eighth notes
-// at that root pitch (matching the original power-chord rhythm,
-// but reduced to single root notes for a beginner arrangement).
-
 // Bass line anticipates each chord change by one eighth note —
 // the new root arrives on the LAST eighth of the previous bar's
 // harmonic area, then the bar "settles" on the new root.
 //
-// Bar 1: C C C C C C C C
-// Bar 2: C G G G G G G G   (C carries over, then G x7)
-// Bar 3: G Bb Bb Bb Bb Bb Bb Bb (G carries over, then Bb x7)
-// Bar 4: Bb G G G G Bb Bb Bb   (turnaround back toward bar 1)
+// Bar 1: C C C C C C C C            (Cm)
+// Bar 2: C G G G G G G G            (Gm)
+// Bar 3: G Bb Bb Bb Bb Bb Bb Bb      (Bb)
+// Bar 4: Bb G G G G Bb Bb Bb         (Gm, then Bb — turnaround)
 
-const SCORE = {
+let SCORE = {
   title: "Rolling in the Deep",
   composer: "Adele — arr. for piano accompaniment",
   section: "Intro — Left Hand (root notes)",
   timeSignature: { num: 4, den: 4 },
-  keySignature: "Cm",   // C minor (3 flats: Bb, Eb, Ab) — matches original
-  barsPerSystem: 4,
+  keySignature: "Cm",
+  barsPerSystem: 2,
   bars: [
-    // Bar 1: Cm — chord at note 0
     { bass: notes(["C3","C3","C3","C3","C3","C3","C3","C3"], "8"),
       chords: [{ idx: 0, name: "Cm" }] },
-    // Bar 2: Gm — chord at note 1 (the G that establishes the new harmony)
     { bass: notes(["C3","G2","G2","G2","G2","G2","G2","G2"], "8"),
       chords: [{ idx: 1, name: "Gm" }] },
-    // Bar 3: Bb — chord at note 1
     { bass: notes(["G2","Bb2","Bb2","Bb2","Bb2","Bb2","Bb2","Bb2"], "8"),
       chords: [{ idx: 1, name: "Bb" }] },
-    // Bar 4: Gm at note 1, Bb at note 5 (turnaround)
     { bass: notes(["Bb2","G2","G2","G2","G2","Bb2","Bb2","Bb2"], "8"),
       chords: [{ idx: 1, name: "Gm" }, { idx: 5, name: "Bb" }] },
   ]
 };
-
-function repeatNote(pitch, dur, count) {
-  const arr = [];
-  for (let i = 0; i < count; i++) {
-    arr.push({ pitch, dur });
-  }
-  return arr;
-}
 
 function notes(pitches, dur) {
   return pitches.map(p => ({ pitch: p, dur }));
 }
 
 // ============================================================
-// RENDER — bass clef only, single line, 8th notes
+// A4 PAGE LAYOUT — same conventions as the main Notewise editor
+// ============================================================
+
+const A4_RATIO = 1.414;
+
+function layoutPage() {
+  const page = document.getElementById('page');
+  const pageW = page.parentElement.clientWidth - 16; // account for body padding
+  const pageH = pageW * A4_RATIO;
+  const padding = pageW * 0.05;
+
+  page.style.minHeight = pageH + 'px';
+  page.style.padding = padding + 'px ' + padding + 'px';
+
+  const titleSize = Math.min(pageW * 0.85 * 0.13, 44);
+  document.getElementById('score-title').style.fontSize = titleSize + 'px';
+  document.getElementById('score-composer').style.fontSize = (titleSize * 0.36) + 'px';
+  document.getElementById('score-section').style.fontSize = (titleSize * 0.45) + 'px';
+}
+
+// ============================================================
+// RENDER — bass clef, chord names, A4-scaled
 // ============================================================
 
 function render() {
+  layoutPage();
+
   const container = document.getElementById('score');
   container.innerHTML = '';
 
   if (!window.Vex) { container.innerHTML = '<p style="color:#c00;padding:10px">VexFlow not loaded</p>'; return; }
   const VF = Vex.Flow;
 
-  const pageEl = document.getElementById('page');
-  const pageW = pageEl.clientWidth;
-  const contentW = pageW * 0.9;
-  const bps = SCORE.barsPerSystem || 4;
+  try {
+    renderScore(VF, container);
+  } catch (e) {
+    container.innerHTML = '<div style="color:#c00;padding:10px;font-size:12px">Render error: ' + e.message + '</div>';
+  }
+}
 
-  const systems = [];
-  for (let i = 0; i < SCORE.bars.length; i += bps) {
-    systems.push(SCORE.bars.slice(i, i + bps));
+// ── Layout constants ──────────────────────────────────────────
+// minEighthW: minimum px (at current scale) needed per eighth note
+// so VexFlow never has to compress below readable spacing.
+const MIN_EIGHTH_W = 26;
+const RIGHT_PAD = 10;
+
+function minNoteUnits(bar) {
+  return bar.bass.length * MIN_EIGHTH_W;
+}
+
+// Measure the ACTUAL pixel width VexFlow needs for clef + key signature
+// + time signature, instead of guessing. We draw clef+key+time on the
+// first bar of EVERY line (not just line 1) — this guarantees every
+// line's modifiers are identical, so every line's first note starts
+// at exactly the same x position automatically.
+function measureLineStartOverhead(VF, keySignature, timeSig) {
+  const tmpDiv = document.createElement('div');
+  const tmpRenderer = new VF.Renderer(tmpDiv, VF.Renderer.Backends.SVG);
+  tmpRenderer.resize(500, 100);
+  const tmpCtx = tmpRenderer.getContext();
+  const tmpStave = new VF.Stave(0, 0, 400);
+  tmpStave.addClef('bass').addKeySignature(keySignature)
+    .addTimeSignature(timeSig.num + '/' + timeSig.den);
+  tmpStave.setContext(tmpCtx).draw();
+  return tmpStave.getNoteStartX() - tmpStave.getX();
+}
+
+function renderScore(VF, container) {
+  const page = document.getElementById('page');
+  const pageW = page.clientWidth;
+  const contentW = pageW * 0.9;
+  const maxBarsPerLine = SCORE.barsPerSystem || 2;
+
+  const leftX = 10;
+  const totalW = contentW - leftX - RIGHT_PAD;
+
+  // Real width needed for clef + key sig + time sig — measured, not guessed
+  const LINE_START_OVERHEAD = measureLineStartOverhead(VF, SCORE.keySignature, SCORE.timeSignature);
+
+  // ── Pack bars onto lines based on content width, not a fixed count ──
+  // Every line reserves LINE_START_OVERHEAD for its first bar.
+  // A bar is added to the current line only if it still fits within totalW.
+  const lines = [];
+  let i = 0;
+  while (i < SCORE.bars.length) {
+    const line = [SCORE.bars[i]];
+    let used = LINE_START_OVERHEAD + minNoteUnits(SCORE.bars[i]);
+    let j = i + 1;
+    while (line.length < maxBarsPerLine && j < SCORE.bars.length) {
+      const w = minNoteUnits(SCORE.bars[j]);
+      if (used + w <= totalW) { line.push(SCORE.bars[j]); used += w; j++; }
+      else break;
+    }
+    lines.push(line);
+    i = j;
   }
 
-  systems.forEach((sysBars, si) => {
+  lines.forEach((lineBars, li) => {
     const systemDiv = document.createElement('div');
-    systemDiv.style.marginBottom = '8px';
+    systemDiv.style.marginBottom = '6px';
     container.appendChild(systemDiv);
 
     const vfDiv = document.createElement('div');
@@ -140,27 +267,29 @@ function render() {
     renderer.resize(contentW, svgH);
     const ctx = renderer.getContext();
 
-    const leftX = 10;
-    const totalW = contentW - leftX - 10;
-    const numBars = sysBars.length;
-
-    // First bar gets extra width for clef + key sig + time sig
-    const firstBarExtra = 70;
-    const barW = (totalW - firstBarExtra) / numBars;
+    // ── Distribute width: overhead is FIXED (same on every line so
+    // note-start aligns), remaining space stretches proportionally
+    // to each bar's note count ──
+    const sumNoteUnits = lineBars.reduce((a, b) => a + minNoteUnits(b), 0);
+    const noteSpaceAvailable = totalW - LINE_START_OVERHEAD;
+    const scale = noteSpaceAvailable / sumNoteUnits;
 
     let x = leftX;
-    sysBars.forEach((bar, bi) => {
-      const isFirst = (si === 0 && bi === 0);
-      const w = isFirst ? barW + firstBarExtra : barW;
+    lineBars.forEach((bar, bi) => {
+      const isFirstBar = (bi === 0);
+      const noteSpace = minNoteUnits(bar) * scale;
+      const w = isFirstBar ? LINE_START_OVERHEAD + noteSpace : noteSpace;
 
-      const stave = new VF.Stave(x, 24, w);
-      if (isFirst) {
+      const stave = new VF.Stave(x, 32, w);
+      // Clef + key signature + time signature on the first bar of EVERY line —
+      // this keeps the measured overhead identical everywhere, so notes
+      // always start at the same x position regardless of which line.
+      if (isFirstBar) {
         stave.addClef('bass').addKeySignature(SCORE.keySignature)
           .addTimeSignature(SCORE.timeSignature.num + '/' + SCORE.timeSignature.den);
       }
       stave.setContext(ctx).draw();
 
-      // Build notes for this bar
       const barNotes = bar.bass.map(n => {
         const pm = n.pitch.match(/^([A-Gb#]+)(\d)$/);
         const noteName = pm ? pm[1].toLowerCase() : 'c';
@@ -173,19 +302,6 @@ function render() {
         });
       });
 
-      // Chord name annotations
-      if (bar.chords) {
-        bar.chords.forEach(c => {
-          barNotes[c.idx].addModifier(
-            new VF.Annotation(c.name)
-              .setVerticalJustification(VF.Annotation.VerticalJustify.TOP)
-              .setFont('Georgia', 13, 'bold'),
-            0
-          );
-        });
-      }
-
-      // Beam in two groups of 4
       const beams = [
         new VF.Beam(barNotes.slice(0, 4)),
         new VF.Beam(barNotes.slice(4, 8)),
@@ -195,18 +311,146 @@ function render() {
         .setMode(VF.Voice.Mode.SOFT);
       voice.addTickables(barNotes);
 
-      const formatW = w - (isFirst ? firstBarExtra : 0) - 20;
+      const formatW = noteSpace - RIGHT_PAD;
       new VF.Formatter().joinVoices([voice]).format([voice], formatW);
       voice.draw(ctx, stave);
 
       beams.forEach(b => b.setContext(ctx).draw());
+
+      // Chord names — placed dynamically above the highest stem/beam in this bar
+      if (bar.chords) {
+        let minTopY = Infinity;
+        barNotes.forEach(n => {
+          if (typeof n.getStemExtents === 'function') {
+            const ext = n.getStemExtents();
+            if (ext && typeof ext.topY === 'number') {
+              minTopY = Math.min(minTopY, ext.topY);
+            }
+          }
+        });
+        if (!isFinite(minTopY)) { minTopY = stave.getYForLine(0); }
+        const labelY = Math.max(12, minTopY - 8);
+
+        ctx.save();
+        ctx.setFont('Georgia', 13, 'bold');
+        bar.chords.forEach(c => {
+          const noteX = barNotes[c.idx].getAbsoluteX();
+          const xOff = c.name.length * 3.5;
+          ctx.fillText(c.name, noteX - xOff, labelY);
+        });
+        ctx.restore();
+      }
 
       x += w;
     });
   });
 }
 
-window.addEventListener('load', render);
+// ============================================================
+// API KEY (shared localStorage with main editor)
+// ============================================================
+
+let API_KEY = localStorage.getItem('vne_api_key') || '';
+if (API_KEY) {
+  document.getElementById('key-status').textContent = 'Key loaded';
+  document.getElementById('api-key-section').style.display = 'none';
+}
+document.getElementById('save-key-btn').onclick = () => {
+  API_KEY = document.getElementById('api-key-input').value.trim();
+  if (API_KEY) {
+    localStorage.setItem('vne_api_key', API_KEY);
+    document.getElementById('key-status').textContent = 'Saved!';
+    setTimeout(() => { document.getElementById('api-key-section').style.display = 'none'; }, 800);
+  }
+};
+
+// ============================================================
+// LOG
+// ============================================================
+
+function addLog(cls, text) {
+  const log = document.getElementById('log');
+  const d = document.createElement('div');
+  d.className = 'log-entry log-' + cls;
+  d.textContent = text;
+  log.appendChild(d);
+  log.scrollTop = log.scrollHeight;
+}
+
+// ============================================================
+// CLAUDE API — voice/text command editing
+// ============================================================
+
+async function sendCommand(command) {
+  if (!command.trim()) return;
+  if (!API_KEY) { addLog('err', 'No API key — enter it above'); return; }
+  addLog('cmd', command);
+  document.getElementById('cmd-input').value = '';
+
+  const prompt = `You are a music notation assistant for a piano accompaniment score (bass clef only, left hand).
+Return ONLY valid JSON — no markdown, no explanation.
+
+Score structure:
+{ title, composer, section, timeSignature:{num,den}, keySignature, barsPerSystem,
+  bars: [ { bass:[{pitch,dur}], chords:[{idx,name}] } ] }
+
+pitch format: note letter + optional 'b' for flat or '#' for sharp + octave, e.g. "C3", "Bb2", "G2"
+dur: "8"=eighth "q"=quarter "h"=half "w"=whole
+chords: idx is the index into that bar's bass array; name is the chord symbol shown above that note
+barsPerSystem: how many bars are drawn per line (try 1, 2, or 4)
+
+Current score:
+${JSON.stringify(SCORE, null, 2)}
+
+Command: "${command}"
+
+Return complete updated JSON only.`;
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'x-api-key': API_KEY, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:2000, messages:[{role:'user',content:prompt}] })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      const apiMsg = data?.error?.message || ('HTTP ' + res.status);
+      throw new Error(apiMsg);
+    }
+    if (!data || !data.content) {
+      throw new Error('Unexpected API response: ' + JSON.stringify(data).slice(0, 150));
+    }
+    const text = data.content.map(b=>b.text||'').join('').trim().replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch (pe) {
+      throw new Error('Could not parse score JSON: ' + text.slice(0, 150));
+    }
+    SCORE = parsed;
+    render();
+    addLog('ok', 'Score updated');
+  } catch(e) {
+    addLog('err', e.message);
+  }
+}
+
+// ============================================================
+// EVENT LISTENERS
+// ============================================================
+
+document.getElementById('send-btn').onclick = () => sendCommand(document.getElementById('cmd-input').value);
+document.getElementById('cmd-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendCommand(e.target.value); }
+});
+document.querySelectorAll('.qbtn').forEach(btn => {
+  btn.onclick = () => sendCommand(btn.dataset.cmd);
+});
+
+window.addEventListener('load', () => {
+  addLog('sys', 'VexFlow ready — score loaded');
+  render();
+});
 window.addEventListener('resize', render);
 </script>
 </body>
