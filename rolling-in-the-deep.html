@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rolling in the Deep — Accompaniment</title>
+<script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.2/build/cjs/vexflow.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: Georgia, serif;
+  background: #777;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 8px;
+  gap: 12px;
+}
+#page {
+  background: white;
+  width: 100%;
+  max-width: 680px;
+  min-height: 400px;
+  padding: 5% 5%;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.35);
+  box-sizing: border-box;
+}
+#title { text-align: center; margin-bottom: 4px; }
+#title h1 { font-size: clamp(20px, 7vw, 44px); font-weight: bold; color: #1a1410; letter-spacing: 0.02em; }
+#title p  { font-size: clamp(10px, 3vw, 16px); color: #666; font-style: italic; margin-top: 4px; }
+#title .section { font-size: clamp(12px, 4vw, 20px); color: #1a1410; font-weight: bold; margin-top: 14px; margin-bottom: 4px; }
+hr { border: none; border-top: 1px solid #ddd; margin-bottom: 14px; }
+#score { width: 100%; }
+#score svg { max-width: 100%; }
+#status { font-size: 0.6rem; color: #ccc; font-family: monospace; }
+</style>
+</head>
+<body>
+
+<div id="page">
+  <div id="title">
+    <h1>Rolling in the Deep</h1>
+    <p>Adele — arr. for piano accompaniment</p>
+    <div class="section">Intro — Left Hand (root notes)</div>
+  </div>
+  <hr>
+  <div id="score"></div>
+</div>
+<div id="status">Accompaniment Arranger — Phase 1 prototype</div>
+
+<script>
+// ============================================================
+// SCORE DATA MODEL — extended for independent treble/bass parts
+// ============================================================
+//
+// This is the foundation for Phase 1 of the roadmap: each bar
+// can have an independent "bass" array and "treble" array.
+// For this intro, treble is empty — left hand only.
+//
+// Roots given: C - G - Bb - G, each bar = 8 eighth notes
+// at that root pitch (matching the original power-chord rhythm,
+// but reduced to single root notes for a beginner arrangement).
+
+// Bass line anticipates each chord change by one eighth note —
+// the new root arrives on the LAST eighth of the previous bar's
+// harmonic area, then the bar "settles" on the new root.
+//
+// Bar 1: C C C C C C C C
+// Bar 2: C G G G G G G G   (C carries over, then G x7)
+// Bar 3: G Bb Bb Bb Bb Bb Bb Bb (G carries over, then Bb x7)
+// Bar 4: Bb G G G G Bb Bb Bb   (turnaround back toward bar 1)
+
+const SCORE = {
+  title: "Rolling in the Deep",
+  composer: "Adele — arr. for piano accompaniment",
+  section: "Intro — Left Hand (root notes)",
+  timeSignature: { num: 4, den: 4 },
+  keySignature: "Cm",   // C minor (3 flats: Bb, Eb, Ab) — matches original
+  barsPerSystem: 4,
+  bars: [
+    // Bar 1: Cm — chord at note 0
+    { bass: notes(["C3","C3","C3","C3","C3","C3","C3","C3"], "8"),
+      chords: [{ idx: 0, name: "Cm" }] },
+    // Bar 2: Gm — chord at note 1 (the G that establishes the new harmony)
+    { bass: notes(["C3","G2","G2","G2","G2","G2","G2","G2"], "8"),
+      chords: [{ idx: 1, name: "Gm" }] },
+    // Bar 3: Bb — chord at note 1
+    { bass: notes(["G2","Bb2","Bb2","Bb2","Bb2","Bb2","Bb2","Bb2"], "8"),
+      chords: [{ idx: 1, name: "Bb" }] },
+    // Bar 4: Gm at note 1, Bb at note 5 (turnaround)
+    { bass: notes(["Bb2","G2","G2","G2","G2","Bb2","Bb2","Bb2"], "8"),
+      chords: [{ idx: 1, name: "Gm" }, { idx: 5, name: "Bb" }] },
+  ]
+};
+
+function repeatNote(pitch, dur, count) {
+  const arr = [];
+  for (let i = 0; i < count; i++) {
+    arr.push({ pitch, dur });
+  }
+  return arr;
+}
+
+function notes(pitches, dur) {
+  return pitches.map(p => ({ pitch: p, dur }));
+}
+
+// ============================================================
+// RENDER — bass clef only, single line, 8th notes
+// ============================================================
+
+function render() {
+  const container = document.getElementById('score');
+  container.innerHTML = '';
+
+  if (!window.Vex) { container.innerHTML = '<p style="color:#c00;padding:10px">VexFlow not loaded</p>'; return; }
+  const VF = Vex.Flow;
+
+  const pageEl = document.getElementById('page');
+  const pageW = pageEl.clientWidth;
+  const contentW = pageW * 0.9;
+  const bps = SCORE.barsPerSystem || 4;
+
+  const systems = [];
+  for (let i = 0; i < SCORE.bars.length; i += bps) {
+    systems.push(SCORE.bars.slice(i, i + bps));
+  }
+
+  systems.forEach((sysBars, si) => {
+    const systemDiv = document.createElement('div');
+    systemDiv.style.marginBottom = '8px';
+    container.appendChild(systemDiv);
+
+    const vfDiv = document.createElement('div');
+    systemDiv.appendChild(vfDiv);
+
+    const svgH = 150;
+    const renderer = new VF.Renderer(vfDiv, VF.Renderer.Backends.SVG);
+    renderer.resize(contentW, svgH);
+    const ctx = renderer.getContext();
+
+    const leftX = 10;
+    const totalW = contentW - leftX - 10;
+    const numBars = sysBars.length;
+
+    // First bar gets extra width for clef + key sig + time sig
+    const firstBarExtra = 70;
+    const barW = (totalW - firstBarExtra) / numBars;
+
+    let x = leftX;
+    sysBars.forEach((bar, bi) => {
+      const isFirst = (si === 0 && bi === 0);
+      const w = isFirst ? barW + firstBarExtra : barW;
+
+      const stave = new VF.Stave(x, 24, w);
+      if (isFirst) {
+        stave.addClef('bass').addKeySignature(SCORE.keySignature)
+          .addTimeSignature(SCORE.timeSignature.num + '/' + SCORE.timeSignature.den);
+      }
+      stave.setContext(ctx).draw();
+
+      // Build notes for this bar
+      const barNotes = bar.bass.map(n => {
+        const pm = n.pitch.match(/^([A-Gb#]+)(\d)$/);
+        const noteName = pm ? pm[1].toLowerCase() : 'c';
+        const oct = pm ? pm[2] : '3';
+        return new VF.StaveNote({
+          keys: [noteName + '/' + oct],
+          duration: n.dur,
+          clef: 'bass',
+          auto_stem: true,
+        });
+      });
+
+      // Chord name annotations
+      if (bar.chords) {
+        bar.chords.forEach(c => {
+          barNotes[c.idx].addModifier(
+            new VF.Annotation(c.name)
+              .setVerticalJustification(VF.Annotation.VerticalJustify.TOP)
+              .setFont('Georgia', 13, 'bold'),
+            0
+          );
+        });
+      }
+
+      // Beam in two groups of 4
+      const beams = [
+        new VF.Beam(barNotes.slice(0, 4)),
+        new VF.Beam(barNotes.slice(4, 8)),
+      ];
+
+      const voice = new VF.Voice({ num_beats: SCORE.timeSignature.num, beat_value: SCORE.timeSignature.den })
+        .setMode(VF.Voice.Mode.SOFT);
+      voice.addTickables(barNotes);
+
+      const formatW = w - (isFirst ? firstBarExtra : 0) - 20;
+      new VF.Formatter().joinVoices([voice]).format([voice], formatW);
+      voice.draw(ctx, stave);
+
+      beams.forEach(b => b.setContext(ctx).draw());
+
+      x += w;
+    });
+  });
+}
+
+window.addEventListener('load', render);
+window.addEventListener('resize', render);
+</script>
+</body>
+</html>
